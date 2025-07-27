@@ -1,31 +1,29 @@
 const {
   loadFixture,
 } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
-// const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
+
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-// util functon
+
 const deployCounter = async () => {
-  // target the CounterV2 contract within our contract folder
+  
   const CounterContract1 = await ethers.getContractFactory("CounterV2");
   const counterV2 = await CounterContract1.deploy();
 
-  // target the CounterV2Caller contract within our contract folder
+  
   const CounterContract2 = await ethers.getContractFactory("CounterV2Caller");
   const targetAddress = await counterV2.getAddress();
-  // console.log(targetAddress);
+ 
 
-  // deploy the contract with the target address we got from calling the getContractFactory() method on the ethers.js library passing in the target contract
+  
   const counterV2caller = await CounterContract2.deploy(targetAddress);
 
-  // console.log("This is the counterV2 object:", counterV2);
-  // console.log("This is the counterV2Caller object:", counterV2caller);
+ 
 
   return { counterV2, counterV2caller }; // Returns the deployed contracts as an object
 };
 
-// Counter Test Suite
 describe("CounterV2 Test Suite", () => {
   describe("Deployment", () => {
     describe("CounterV2 Deployment", () => {
