@@ -19,14 +19,22 @@ struct OfferDetails{
     uint256 listId;
     uint256 offerAmount;
     address offerrer;
+    bool status;
 }
 
 contract BlockMarketPlace {
 
 mapping (uint256 listid => Listing list) public idToListing;
 mapping (uint256 offerid => OfferDetails offer) public idToOffer;
+
 uint256 lastUpdatedid;
+uint256 lastOfferId;
 address marketOwner;
+
+    constructor() {
+        marketOwner = msg.sender;
+    }    
+
     function listNft(Listing memory list) external {
        uint listId =  lastUpdatedid++;
        require(list.price > 0, "Invalid price");
@@ -52,6 +60,7 @@ address marketOwner;
         Listing memory l = idToListing[listId];
         require(!l.sold, "ALready Sold");
         idToListing[listId].sold = true;
+
         if(l.isNative){
             require(msg.value == l.price, "Incorrect price");
             (bool s,) = l.owner.call{value: l.price * 97/100}("");
@@ -65,51 +74,76 @@ address marketOwner;
         IERC721(l.NftToken).transferFrom(address(this), msg.sender, l.tokenId);
     }
 
-    function offer(uint256 listid) external payable {
+    function offer(uint256 listid, uint256 offerAmount) external payable {
+        uint256 offerId = lastOfferId++;
         Listing memory l = idToListing[listid];
-        require(!l.sold, "ALready Sold");
-        require(msg.value > l.minOffer, "offer too low");
-        uint256 offerId = lastUpdatedid++;
-        idToOffer[offerId] = OfferDetails({
-            listId: listid,
-            offerAmount: msg.value,
-            offerrer: msg.sender
-        });
+        require(!l.sold, "Already sold");
+        if(l.isNative){
+            require(msg.value >= l.minOffer, "Invalid offer");
+            require(offerAmount == 0, "Cannot offer erc20");
+        }else {
+        require(offerAmount >= l.minOffer, "Invalid offer");  
+        l.paymentToken.transferFrom(msg.sender, address(this), offerAmount);         
+        }
+        require(msg.sender != l.owner, "Owner cannot offer");
+        OfferDetails memory offer_;
+        offer_.listId = listid;
+        offer_.offerrer = msg.sender;
+        offer_.offerAmount = l.isNative ? msg.value : offerAmount;
+
+        idToOffer[offerId] = offer_;
     }
 
     function acceptOffer(uint256 offerid) external {
-        OfferDetails memory offerDetails = idToOffer[offerid];
-        Listing storage l = idToListing[offerDetails.listId];
-        require(!l.sold, "ALready Sold");
-        require(msg.sender == l.owner, "you are not the owner");
-        require(offerDetails.offerAmount >= l.minOffer, "Offer too low");
-
-        l.sold = true;
+        OfferDetails memory offer_ = idToOffer[offerid];
+        Listing memory l = idToListing[offer_.listId];
+        // Checks
+        require(l.owner == msg.sender, "Unauthorized seller");
+        require(!l.sold, "Already Sold");
+        require(offer_.offerrer != address(0), "Invalid offer");
+        // Effects
+        idToListing[offer_.listId].sold = true;
+        idToOffer[offerid].status = true;
+        // Interactions
         if(l.isNative){
-            (bool s,) = l.owner.call{value: offerDetails.offerAmount * 97/100}("");
-            (bool ss,) = marketOwner.call{value: offerDetails.offerAmount * 3/100}("");
-            require(s, "Owner transfer failed");
-            require(ss, "MarketOwner Transfer failed");
+            (bool success,) = l.owner.call{value: offer_.offerAmount * 97/100}("");
+            (bool success2,) = marketOwner.call{value: offer_.offerAmount * 3/100}("");
+            require(success, "Failed owner transfer");
+            require(success2, "Failed marketPlace commission transfer");
         }else{
-            
-            l.paymentToken.transferFrom(offerDetails.offerrer, l.owner, offerDetails.offerAmount * 97/100);
-            l.paymentToken.transferFrom(offerDetails.offerrer, marketOwner, offerDetails.offerAmount * 3/100);
+            l.paymentToken.transfer(l.owner, offer_.offerAmount * 97/100);
+            l.paymentToken.transfer(marketOwner, offer_.offerAmount * 3/100);
         }
-        IERC721(l.NftToken).transferFrom(address(this), offerDetails.offerrer, l.tokenId);
+        IERC721(l.NftToken).transferFrom(address(this), offer_.offerrer, l.tokenId);
     }
 
     function cancelOffer(uint256 offerid) external{
-        OfferDetails memory offerDetails = idToOffer[offerid];
-        require(offerDetails.offerrer == msg.sender, "Only sender can cancelOffer ");
+        OfferDetails memory offer_ = idToOffer[offerid];
+        Listing memory l = idToListing[offer_.listId];
+        // Checks
+        require(!offer_.status, "Offer already accepted");
+        require(msg.sender == offer_.offerrer, "Unauthorized offerrer");
+        // Effects
         delete idToOffer[offerid];
+        // Interactions
+        if(l.isNative){
+            (bool s,) = offer_.offerrer.call{value: offer_.offerAmount}("");
+            require(s, "Failed refund");
+        }else{
+            l.paymentToken.transfer(offer_.offerrer, offer_.offerAmount);
+        }
+
     }
 
     function cancelListing(uint256 listid) external {
-        Listing storage l = idToListing[listid];
-        require(l.owner == msg.sender, "Only owner can cancel");
-        require(!l.sold, "already sold");
+        Listing memory l = idToListing[listid];
+        // Checks
+        require(msg.sender == l.owner, "Unauthorized user");
+        require(!l.sold, "Already sold");
+        // Effects
         delete idToListing[listid];
-        IERC721(l.NftToken).transferFrom(address(this), msg.sender, l.tokenId);
+        // Interaction
+        IERC721(l.NftToken).transferFrom(address(this), l.owner, l.tokenId);
     }
 
 }
