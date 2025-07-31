@@ -65,28 +65,51 @@ address marketOwner;
         IERC721(l.NftToken).transferFrom(address(this), msg.sender, l.tokenId);
     }
 
-    function offer(uint256 listid) external payable {}
+    function offer(uint256 listid) external payable {
+        Listing memory l = idToListing[listid];
+        require(!l.sold, "ALready Sold");
+        require(msg.value > l.minOffer, "offer too low");
+        uint256 offerId = lastUpdatedid++;
+        idToOffer[offerId] = OfferDetails({
+            listId: listid,
+            offerAmount: msg.value,
+            offerrer: msg.sender
+        });
+    }
 
-    function acceptOffer(uint256 offerid) external {}
+    function acceptOffer(uint256 offerid) external {
+        OfferDetails memory offerDetails = idToOffer[offerid];
+        Listing storage l = idToListing[offerDetails.listId];
+        require(!l.sold, "ALready Sold");
+        require(msg.sender == l.owner, "you are not the owner");
+        require(offerDetails.offerAmount >= l.minOffer, "Offer too low");
 
-    function cancelOffer(uint256 offerid) external{}
+        l.sold = true;
+        if(l.isNative){
+            (bool s,) = l.owner.call{value: offerDetails.offerAmount * 97/100}("");
+            (bool ss,) = marketOwner.call{value: offerDetails.offerAmount * 3/100}("");
+            require(s, "Owner transfer failed");
+            require(ss, "MarketOwner Transfer failed");
+        }else{
+            
+            l.paymentToken.transferFrom(offerDetails.offerrer, l.owner, offerDetails.offerAmount * 97/100);
+            l.paymentToken.transferFrom(offerDetails.offerrer, marketOwner, offerDetails.offerAmount * 3/100);
+        }
+        IERC721(l.NftToken).transferFrom(address(this), offerDetails.offerrer, l.tokenId);
+    }
 
-    function cancelListing(uint256 listid) external {}
+    function cancelOffer(uint256 offerid) external{
+        OfferDetails memory offerDetails = idToOffer[offerid];
+        require(offerDetails.offerrer == msg.sender, "Only sender can cancelOffer ");
+        delete idToOffer[offerid];
+    }
 
-}
+    function cancelListing(uint256 listid) external {
+        Listing storage l = idToListing[listid];
+        require(l.owner == msg.sender, "Only owner can cancel");
+        require(!l.sold, "already sold");
+        delete idToListing[listid];
+        IERC721(l.NftToken).transferFrom(address(this), msg.sender, l.tokenId);
+    }
 
-contract MarketPlace is  BlockMarketPlace{
-
-
-function listNfts (Listing memory list) external {
-   require(list.price==0, "price not set");
- 
-    idToListing[list.id] = list;
-}
-
-function buyNfts (uint256 listId) external payable {
-    Listing memory listed = idToListing[listId];
-    require(!listed.sold, "NFT already sold");
-    require(msg.value >= listed.price, "Insufficient payment");
-}
 }
